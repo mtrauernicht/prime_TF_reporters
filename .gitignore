@@ -51,3 +51,5 @@ rsconnect/
 
 # raw-data-analysis folders
 data/**/results/
+data/**/.snakemake/
+data/**/logs/
