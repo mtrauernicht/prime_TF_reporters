@@ -50,4 +50,4 @@ po/*~
 rsconnect/
 
 # raw-data-analysis folders
-data/**/raw-data-analysis/
+data/**/results/
