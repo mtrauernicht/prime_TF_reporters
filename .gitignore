@@ -47,3 +47,6 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# raw-data-analysis folders
+data/**/raw-data-analysis/

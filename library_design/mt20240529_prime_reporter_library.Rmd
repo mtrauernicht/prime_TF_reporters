@@ -1,0 +1,326 @@
+---
+title: "Oligo Design - TF reporter screen gen 2"
+author: "Max Trauernicht"
+date: "`r format(Sys.time(), '%Y-%m-%d')`"
+output: 
+  prettydoc::html_pretty:
+    theme: leonids
+  #   highlight: github
+  #   toc: true
+  #   toc_float: true
+  #   code_folding: show
+  # editor_options:
+  #   chunk_output_type: console
+---
+
+*knitr document van Steensel lab*
+
+# Oligo Design - TF reporter screen gen 2
+
+## Introduction
+In this document, an oligo library of TF reporters will be generated. These oligos contain TF binding sites of ~30 selected TFs, random inactive spacing between them, followed by minimal promoters, and a barcode in the transcription unit.
+
+### Load libraries
+
+```{r setup, out.width= "100%", fig.align= "center", echo=FALSE, warning= FALSE, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+StartTime <-Sys.time()
+
+# 8-digit Date tag:
+Date <- substr(gsub("-","",Sys.time()),1,8) 
+# libraries:
+library(ggplot2)
+library(seqinr)
+library(seqLogo)
+library(universalmotif)
+library(Biostrings)
+library(SimRAD)
+library(gtools)
+library(DNABarcodes)
+library(phylotools)
+library(ape)
+library(magrittr)
+library(dplyr)
+library(readr)
+library(stringr)
+library(tidyr)
+library(heatmaply)
+library(pheatmap)
+library(tibble)
+library(ggseqlogo)
+library(RColorBrewer)
+library(data.table)
+library(vwr)
+library(ggbeeswarm)
+library(ggrepel)
+library(sjmisc)
+library(RcmdrMisc)
+library(LncFinder)
+library(ENCODExplorer)
+library(biomaRt)
+library(ggpubr)
+```
+
+### Load functions
+
+```{r out.width= "100%", fig.align= "center", echo=FALSE, warning= FALSE, message=FALSE}
+SetFileName <- function(filename, initials) {
+  # Set filename with extension and initials to make filename with date integrated.
+  filename <- substitute(filename)
+  initials <- substitute(initials)
+  filename <- paste0(initials, Date, filename)
+  filename
+}
+
+# Function to substring the right part of the motif
+substrRight <- function(x, n){
+  substr(x, nchar(x)-n+1, nchar(x))
+}
+
+
+# Function to load PWM matrix
+get_pwm_feature_matrix <- function(motif_meta_fn, fimo_fn, db = 2) {
+
+  # validate args
+  valid_dbs <- 1:2
+  if(!db %in% valid_dbs)
+    stop('Invalid db (database version). Please use db=1 (maintained for backward compatibility only) or db=2')
+
+  # db=1 is maintained for backward compatibility only
+  if(db == 1) {
+
+    # read in motif metadata
+    motif_meta    <- read.csv(motif_meta_fn)
+
+    # check whether motif metadata contain essential annotations
+    if(!all(c('PWM.ID', 'Cognate.TF') %in% colnames(motif_meta))) {
+      message('The motif metadata file does not contain the essential columns PWM.ID and Cognate.TF')
+    }
+
+    motif_minimal <- motif_meta[, c('PWM.ID', 'Cognate.TF')]
+
+    # load fimo output --> extract motif id, sequence id and p-value
+    df <- read.table(fimo_fn)
+    df <- df[, c(1, 2, 7)]
+
+    colnames(df) <- c('PWM.ID', 'seqid', 'pval')
+
+    # add TF id
+    df <- merge(df, motif_minimal, by = 'PWM.ID')
+
+    # group motif hits by sequence id
+    l <- split(df, df[['seqid']])
+
+    # multiple PWM and multiple hits possible. Reduce hits to one per TF, keeping best p-val only
+    l <- lapply(l, function(x) {
+      x_by_tf <- split(x, x[['Cognate.TF']], drop = TRUE)
+      x_by_tf <- lapply(x_by_tf, function(y) y[which.min(y$pval), ])
+      do.call('rbind', x_by_tf)
+    })
+
+    # initialize feature matrix
+    n_tf          <- motif_minimal[['Cognate.TF']] %>%
+      unique %>%
+      length
+    n_seq         <- length(l)
+    pwm           <- matrix(1, nrow = n_seq, ncol = n_tf)
+    colnames(pwm) <- (motif_minimal[['Cognate.TF']] %>% unique)
+
+    # replace :: from names of composite motifs
+    colnames(pwm) <- str_replace_all(colnames(pwm), '::', '_')
+
+    # fill in feature matrix
+    for(i in 1 : n_seq) {
+      pwm[i, l[[i]][['Cognate.TF']]] <- l[[i]]$pval
+    }
+
+    # -log10 transform
+    pwm           <- -1 * log10(pwm)
+
+    # coerce to tib and return
+    tib_fimo <- as_data_frame(pwm) %>%
+      mutate(id = names(l))
+      dplyr::select(id, everything())
+
+  }
+
+  # db = 2 (default)
+  else {
+
+    # load metadata
+    tib_meta    <- read_csv(motif_meta_fn) %>%
+      # extract tf symbol from motif id (Cognate_TF unsafe, it can be empty) and replace :: occurrences
+      mutate(tf_symbol = str_remove(ID, '_[0-9]*'),
+             tf_symbol = str_replace(tf_symbol, '::', '_')) %>%
+      dplyr::select(motif_id = `PWM ID`, tf_symbol)
+
+    # load fimo results
+    tib_fimo <- read_tsv(fimo_fn) %>%
+      # extract motif id, sequence id and p-value
+      dplyr::select(motif_id, sequence_name, pval = `p-value`, start)
+
+    # add tf symbol to fimo results
+    tib_fimo <- tib_fimo %>%
+      left_join(tib_meta, by = 'motif_id') %>%
+      # remove hits with missing motif id (composite pwms)
+      filter(!is.na(tf_symbol))
+
+    # # select best hit for each motif and sequence
+    # tib_fimo <- tib_fimo %>%
+    #   group_by(sequence_name, tf_symbol) %>%
+    #   dplyr::slice(which.min(pval)) %>%
+    #   ungroup()
+
+    # spread into feature matrix
+    tib_fimo <- tib_fimo %>%
+      mutate(pval = -1 * log10(pval)) %>%
+      dplyr::select(-motif_id) %>%
+      spread(key = tf_symbol, value = pval, fill = 0, drop = TRUE) %>%
+      # perform cosmetics on the id
+      mutate(id = sequence_name) %>%
+      dplyr::select(-c(sequence_name)) %>%
+      dplyr::select(id, everything())
+
+  }
+
+  return(tib_fimo)
+
+}
+
+ReadFasta<-function(file) {
+   # Read the file line by line
+   fasta<-readLines(file)
+   # Identify header lines
+   ind<-grep(">", fasta)
+   # Identify the sequence lines
+   s<-data.frame(ind=ind, from=ind+1, to=c((ind-1)[-1], length(fasta)))
+   # Process sequence lines
+   seqs<-rep(NA, length(ind))
+   for(i in 1:length(ind)) {
+      seqs[i]<-paste(fasta[s$from[i]:s$to[i]], collapse="")
+   }
+   # Create a data frame 
+   DF<-data.frame(name=gsub(">", "", fasta[ind]), sequence=seqs)
+   # Return the data frame as a result object from the function
+   return(DF)
+}
+```
+
+
+### Import data
+```{r}
+# Load from TF_reporter_variant_analysis.Rmd
+best_reporters <- read_csv("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/best_reporters.csv")
+
+# Load sequences from library design files
+lib1_seqs <- read.fasta("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/library_design/output/mt20191205_oligo_pool.fasta")
+lib2_seqs <- read.fasta("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/library_design/gen-2/mt20210326_oligo_pool_gen2.fasta")
+
+# Combine libraries and extract barcodes to match with other file
+lib1_seqs <- lib1_seqs %>%
+  mutate(barcode = gsub(".*CACGACGCTCTTCCGATCT([A-Z]{12}).*", "\\1", seq.text))
+
+lib2_seqs <- lib2_seqs %>%
+  mutate(barcode = gsub(".*CACGACGCTCTTCCGATCT([A-Z]{13}).*", "\\1", seq.text))
+
+lib_1_2_seqs <- lib1_seqs %>%
+  rbind(lib2_seqs) %>%
+  dplyr::select("sequence" = seq.text, barcode)
+
+# Import barcode annotation of both libraries
+bc_annotation <- read_csv("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/library_design/bc_annotation_combined.csv") %>%
+  filter(library == "1+2") %>%
+  mutate(reporter_id = paste(tf, spacing, distance, promoter, background, sep = "_"))
+
+# Combine sequences and best reporter IDs
+reporter_seqs <- bc_annotation %>%
+  distinct(barcode, reporter_id, barcode_number) %>%
+  left_join(lib_1_2_seqs) %>%
+  distinct(reporter_id, sequence, barcode_number)
+
+best_reporters_seq <- best_reporters %>%
+  distinct(tf, reporter_id, conf_level) %>%
+  left_join(reporter_seqs) %>%
+  filter(barcode_number <= 5)
+
+## Manually reduce the length of the barcodes of NR1H2 and STAT6 reporters (so the total length of the library is max. 250bp)
+best_reporters_seq_nr1h2_stat6 <- best_reporters_seq %>%
+  filter(tf %in% c("NR1H2", "STAT6")) %>%
+  mutate(left = gsub("(.*CACGACGCTCTTCCGATCT).*", "\\1", sequence)) %>%
+  mutate(right = gsub(".*CACGACGCTCTTCCGATCT(.*)", "\\1", sequence)) %>%
+  mutate(right = ifelse(tf == "NR1H2", substr(right, 2, 31), right)) %>%
+  mutate(right = ifelse(tf == "STAT6", substr(right, 5, 31), right)) %>%
+  mutate(sequence = paste(left, right, sep = "")) %>%
+  dplyr::select(-c(left, right))
+
+## Manually include a fifth NFAT5 reporter (somehow one was missing - I will just take a barcode from another non-prime NFAT5 reporter)
+best_reporters_seq_nfat5 <- best_reporters_seq %>%
+  filter(tf %in% c("NFAT5"), barcode_number == 2) %>%
+  mutate(barcode_number = 1) %>%
+  mutate(sequence = gsub("(.*CACGACGCTCTTCCGATCT)[A-Z]{13}(.*)", "\\1GTCACCAAGTTGG\\2", sequence))
+
+best_reporters_seq <- best_reporters_seq %>%
+  filter(tf != "NR1H2", tf != "STAT6") %>%
+  rbind(best_reporters_seq_nr1h2_stat6) %>%
+  rbind(best_reporters_seq_nfat5)
+
+# Include random reporters -  all three scrambled TFBSs - only one design per core promoter
+bc_annotation_random <- bc_annotation %>%
+  filter(reporter_id %in% c("RANDOM1_10bp_21bp_minP_1", "RANDOM1_10bp_21bp_mCMV_1", "RANDOM1_10bp_21bp_hBGm_1", "RANDOM1_10bp_21bp_Random_1",
+                            "RANDOM1_10bp_21bp_minP_2", "RANDOM1_10bp_21bp_mCMV_2", "RANDOM1_10bp_21bp_hBGm_2", 
+                            "RANDOM1_10bp_21bp_minP_3", "RANDOM1_10bp_21bp_mCMV_3", "RANDOM1_10bp_21bp_hBGm_3", 
+                            "RANDOM2_10bp_21bp_minP_1", "RANDOM2_10bp_21bp_mCMV_1", "RANDOM2_10bp_21bp_hBGm_1", "RANDOM2_10bp_21bp_Random_1",
+                            "RANDOM2_10bp_21bp_minP_2", "RANDOM2_10bp_21bp_mCMV_2", "RANDOM2_10bp_21bp_hBGm_2", 
+                            "RANDOM2_10bp_21bp_minP_3", "RANDOM2_10bp_21bp_mCMV_3", "RANDOM2_10bp_21bp_hBGm_3", 
+                            "RANDOM3_10bp_21bp_minP_1", "RANDOM3_10bp_21bp_mCMV_1", "RANDOM3_10bp_21bp_hBGm_1", "RANDOM3_10bp_21bp_Random_1",
+                            "RANDOM3_10bp_21bp_minP_2", "RANDOM3_10bp_21bp_mCMV_2", "RANDOM3_10bp_21bp_hBGm_2", 
+                            "RANDOM3_10bp_21bp_minP_3", "RANDOM3_10bp_21bp_mCMV_3", "RANDOM3_10bp_21bp_hBGm_3")) %>%
+  filter(barcode_number <= 5)
+
+reporter_seqs_random <- bc_annotation_random %>%
+  distinct(barcode, reporter_id, barcode_number, tf) %>%
+  left_join(lib_1_2_seqs) %>%
+  distinct(reporter_id, sequence, barcode_number, tf) %>%
+  # Add a column that counts the rows per reporter_id
+  dplyr::group_by(reporter_id) %>%
+  dplyr::mutate(barcode_number2 = dplyr::row_number()) %>%
+  dplyr::ungroup() %>%
+  filter(barcode_number2 <= 5) %>%
+  dplyr::select(-barcode_number2)
+
+
+# Extract sequences
+best_reporters_seq2 <- best_reporters_seq %>%
+  dplyr::select(-conf_level) %>%
+  rbind(reporter_seqs_random) %>%
+  mutate(tf_bc = paste(reporter_id, barcode_number, sep = "_"))
+
+## Add the same reporters with only one barcode (the barcode with the activity closest to the median)  
+
+### Import barcodes closest to median from barcode preprocessing script
+median_barcode <- read_csv("/DATA/usr/m.trauernicht/projects/SuRE-TF/library_design/prime_reporter_library/median_barcodes.csv")
+
+best_reporters_seq2_single <- best_reporters_seq2 %>%
+  right_join(median_barcode) %>%
+  mutate(sequence = gsub("", "", sequence)) %>%
+  mutate(sequence = gsub("", "", sequence)) %>%
+  mutate(tf_bc = paste(tf_bc, "single", sep = "_"))
+
+best_reporters_seq_export <- best_reporters_seq2 %>%
+  distinct(tf_bc, sequence)
+
+best_reporters_seq2_single_export <- best_reporters_seq2_single %>%
+  distinct(tf_bc, sequence)
+
+write_csv(best_reporters_seq_export, "/DATA/usr/m.trauernicht/projects/SuRE-TF/library_design/prime_reporter_library/prime_reporter_library.csv")
+write_csv(best_reporters_seq2_single_export, "/DATA/usr/m.trauernicht/projects/SuRE-TF/library_design/prime_reporter_library/prime_reporter_library_single.csv")
+```
+
+# Session Info
+```{r}
+paste("Run time: ",format(Sys.time()-StartTime))
+getwd()
+date()
+sessionInfo()
+```
+
