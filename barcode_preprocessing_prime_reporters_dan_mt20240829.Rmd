@@ -227,51 +227,36 @@ Aim: Are all barcodes present in the library? If so, are they equally distribute
 ```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
 ## Plot rpm distribution of barcodes per in_bc1 and in_bc5
 ggplot(bc_df %>%
-         filter(cell == "BC1"),
+         mutate(match = !is.na(tf)),
        aes(x = rpm)) +
   geom_histogram(bins = 100) +
-  facet_wrap(~in_bc1) +
+  facet_wrap(~match) +
   theme_pubr() +
   ggtitle("Barcode counts of library with 1 BC per TF (True = matched barcode)")
 
-ggplot(bc_df %>%
-         filter(in_bc1, pDNA == "BC1"),
-       aes(x = log10(rpm))) +
-  geom_histogram(bins = 100) +
-  facet_wrap(~sample_id) +
-  theme_pubr() +
-  ggtitle("Distribution all matched barcodes BC1 library, per sample")
-
-ggplot(bc_df %>%
-         filter(cell == "BC5"),
-       aes(x = rpm)) +
-  geom_histogram(bins = 100) +
-  facet_wrap(~in_bc5) +
-  theme_pubr() +
-  ggtitle("Barcode counts of library with 1 BC per TF (True = matched barcode)")
-
-ggplot(bc_df %>%
-         filter(in_bc5, pDNA == "BC5"),
-       aes(x = log10(rpm))) +
-  geom_histogram(bins = 100) +
-  facet_wrap(~sample_id) +
-  theme_pubr() +
-  ggtitle("Distribution all matched barcodes BC5 library, per sample")
+bc_df_sum <- bc_df %>%
+         mutate(match = !is.na(tf))
+                
+sum(bc_df_sum$starcode_counts[bc_df_sum$match == T])
+sum(bc_df_sum$starcode_counts[bc_df_sum$match == F])
 
 ## Plot rpm distribution of barcodes per in_bc1 and in_bc5
-ggplot(bc_df %>%
-         filter(cell == "BC1", in_bc1),
-       aes(x = 'BC1 library', y = rpm)) +
+ggplot(bc_df_sum %>%
+         filter(match),
+       aes(x = 'all barcodes', y = rpm)) +
   geom_quasirandom() +
   theme_pubr() +
-  ggtitle("Counts of all reporters that should be in BC1 library")
+  ggtitle("Counts of all barcodes that should be in pMT02 library") +
+  facet_wrap(~sample_id)
 
-ggplot(bc_df %>%
-         filter(cell == "BC5", in_bc5),
-       aes(x = 'BC5 library', y = rpm)) +
-  geom_quasirandom() +
+ggplot(bc_df_sum %>%
+         filter(match) %>%
+         mutate(n_bc = as.numeric(ave(barcode, sample_id, FUN = length))) %>%
+         distinct(sample_id, n_bc),
+       aes(x = sample_id, y = n_bc)) +
+  geom_bar(stat = "identity") +
   theme_pubr() +
-  ggtitle("Counts of all reporters that should be in BC5 library")
+  ggtitle("Number of barcodes found per sample")
 ```
 Conclusion: All barcodes can be found in both libraries, and the majority of the reads comes from barcodes in the library. Also, the distribution of barcode counts shifts in the cDNA samples compared to the pDNA samples, which probably means that we are looking at real cDNA barcodes. Looks very good.
 
@@ -285,38 +270,21 @@ Aim: Data quality check: do the counts come from amplifying pDNA or actual cDNA?
 ## 1: Read distribution of matched barcodes vs. unmatched barcode
 
 ### a: total read counts per sample
-for (i in unique(bc_df_filt$pDNA[!is.na(bc_df_filt$pDNA)])) {
-  bc_df_filt_i <- bc_df_filt[bc_df_filt$gcf == "gcf7866" & bc_df_filt$pDNA == i,]
-  p <- plot_ly(bc_df_filt_i %>%
+plot_ly(bc_df_filt %>%
          mutate(sum_counts = ave(starcode_counts, sample, FUN = function(x) sum(x))) %>%
          dplyr::select(sample, sum_counts) %>%
          unique(), 
         x = ~sum_counts, y = ~sample, type = 'bar',
              marker = list(color = '#D6D5C9',
                            line = list(color = 'rgb(8,48,107)', width = 1.5))) %>% 
-  layout(title = paste("Number of reads per barcode per sample", i),
+  layout(title = paste("Number of reads per barcode per sample"),
          xaxis = list(title = "Expected number of reads per barcode per sample"),
          yaxis = list(title = "Sample"))
-  print(p)
-}
-
 
 ## 2: What is the correlation of the cDNA bc counts with the pDNA bc counts? 
-pDNA_bc1 <- bc_df_filt[grep("BC1_r1_gcf7866", bc_df_filt$sample_id),] %>%
-  filter(in_bc1) %>%
-  dplyr::select(barcode, "pDNA" = sample_id, "pDNA_rpm" = rpm) %>%
-  mutate(pDNA = "BC1")
-
-pDNA_bc5 <- bc_df_filt[grep("BC5_r1_gcf7866", bc_df_filt$sample_id),] %>%
-  filter(in_bc5) %>%
-  dplyr::select(barcode, "pDNA" = sample_id, "pDNA_rpm" = rpm) %>%
-  mutate(pDNA = "BC5")
-
-pDNA_pMT02 <- bc_df_filt[grep("pDNA_r1_gcf7027", bc_df_filt$sample_id),] %>%
+pDNA_all <- bc_df_filt[grep("pDNA_r1_gcf7027", bc_df_filt$sample_id),] %>%
   dplyr::select(barcode, "pDNA" = sample_id, "pDNA_rpm" = rpm) %>%
   mutate(pDNA = "pMT02")
-
-pDNA_all = rbind(pDNA_bc1, pDNA_bc5, pDNA_pMT02)
 
 
 bc_df_filt <- merge(pDNA_all, bc_df_filt, all = T, by = c("barcode", "pDNA"))
@@ -325,39 +293,20 @@ bc_df_filt <- bc_df_filt[!is.na(bc_df_filt$sample_id),] %>% drop_na(pDNA_rpm)
 
 ggplot(bc_df_filt %>%
          filter(pDNA == "pMT02"), aes(x = pDNA_rpm, y = rpm)) +
-  geom_bin2d(bins = 50)+
-  xlim(0,500) +
-  ylim(0,2000)+
+  geom_point(alpha = .2) +
+  geom_abline() +
   scale_color_viridis() +
   facet_wrap(~sample_id) +
   ggtitle("cDNA-pDNA correlation: pMT02 library")
 
-ggplot(bc_df_filt %>%
-         filter(pDNA == "BC1"), aes(x = pDNA_rpm, y = rpm)) +
-  geom_point() +
-  geom_abline() +
-  xlim(0,35000) +
-  ylim(0,35000) +
-  facet_wrap(~sample_id)+
-  ggtitle("cDNA-pDNA correlation: BC1 library")
-
-ggplot(bc_df_filt %>%
-         filter(pDNA == "BC5"), aes(x = pDNA_rpm, y = rpm)) +
-  geom_point() +
-  geom_abline() +
-  xlim(0,10000) +
-  ylim(0,10000) +
-  facet_wrap(~sample_id)+
-  ggtitle("cDNA-pDNA correlation: BC5 library")
 
 
 # Generate correlation heatmaps
 bc_df_i <- bc_df_filt %>%
-  mutate(sample_id_pDNA = paste(sample_id, pDNA, sep = "_")) %>%
-  dplyr::select(sample_id_pDNA, rpm, barcode)  %>%
+  dplyr::select(sample_id, rpm, barcode)  %>%
   filter_all(any_vars(!is.na(.))) %>%
   unique() %>%
-  spread(sample_id_pDNA, rpm) %>%
+  spread(sample_id, rpm) %>%
   filter_all(any_vars(!is.na(.))) %>%
   column_to_rownames("barcode")
 
@@ -367,24 +316,21 @@ pheatmap(x, border = "black")
 
 
 
-
 cor <- bc_df_filt %>%
   distinct(sample_id, pDNA) %>%
   mutate(cor = "")
 
 for (i in unique(bc_df_filt$sample_id)) {
-  for (j in unique(bc_df_filt$pDNA)) {
-    if(nrow(bc_df_filt[bc_df_filt$sample_id == i & bc_df_filt$pDNA == j,]) >= 1) {
-          cor$cor[cor$sample_id == i & cor$pDNA == j] <- stats::cor(bc_df_filt$rpm[bc_df_filt$sample_id == i & bc_df_filt$pDNA == j], 
-                                                    bc_df_filt$pDNA_rpm[bc_df_filt$sample_id == i & bc_df_filt$pDNA == j], use = "pairwise.complete.obs")
-    }
+    if(nrow(bc_df_filt[bc_df_filt$sample_id == i,]) >= 1) {
+          cor$cor[cor$sample_id == i] <- stats::cor(bc_df_filt$rpm[bc_df_filt$sample_id == i], 
+                                                    bc_df_filt$pDNA_rpm[bc_df_filt$sample_id == i], use = "pairwise.complete.obs")
     }
 }
 
 cor <- cor %>%
   na.omit()
 
-bc_df_filt <- merge(bc_df_filt, cor, by = c("sample_id", "pDNA"), all = T)
+bc_df_filt <- merge(bc_df_filt, cor, by = c("sample_id"), all = T)
 ```
 Conclusion: cDNA barcode counts don't correlate with pDNA counts - good! There are some differences between the formats (384, 96, 12-wells). 384-wells seems to have more pDNA bleedthrough, but it doesn't seem a very big issue (cDNA-pDNA Pearson correlation < 0.2).
 
@@ -409,11 +355,37 @@ bc_df_cDNA <- bc_df_filt %>%
 ## Calculate correlation between barcodes
 
 ```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
+## Identify and relabel double reporters
+bc_df_12 <- bc_df_cDNA %>%
+  filter(nchar == 12, library == "1+2")
+bc_df_13 <- bc_df_cDNA %>%
+  filter(nchar == 13, library == "1+2")
+double_reporters <- unique(bc_df_13$reporter_id[bc_df_13$reporter_id %in% bc_df_12$reporter_id])
+
+double_reporters_df <- bc_df_cDNA %>%
+  filter(reporter_id %in% double_reporters, library == "1+2", nchar == 13)
+double_reporters_df$reporter_id_2 <- paste(double_reporters_df$reporter_id, double_reporters_df$nchar)
+bc_df_cDNA$reporter_id_2 <- paste(bc_df_cDNA$reporter_id, bc_df_cDNA$nchar)
+bc_df_cDNA <- bc_df_cDNA[!bc_df_cDNA$reporter_id_2 %in% double_reporters_df$reporter_id_2,] %>%
+  dplyr::select(-reporter_id_2)
+double_reporters_df <- double_reporters_df %>%
+  dplyr::select(-reporter_id_2)
+
+double_reporters_df$barcode_number[double_reporters_df$barcode_number == 1] <- 9
+double_reporters_df$barcode_number[double_reporters_df$barcode_number == 2] <- 10
+double_reporters_df$barcode_number[double_reporters_df$barcode_number == 3] <- 11
+double_reporters_df$barcode_number[double_reporters_df$barcode_number == 4] <- 12
+double_reporters_df$barcode_number[double_reporters_df$barcode_number == 5] <- 13
+
+bc_df_cDNA <- rbind(bc_df_cDNA, double_reporters_df)
+
 ## Combine replicates in 8 different columns
 bc_df_rep <- bc_df_cDNA %>% 
-  filter(pDNA == "BC5", in_bc5, sample_id != "BC5_r1_gcf7866") %>%
-  dplyr::select(barcode_number, activity, sample_id, pDNA, reporter_id, neg_ctrls, library) %>%
-  mutate(activity = log2(activity)) %>%
+  filter(commercial_reporter == "No", rand_promoter == "No", native_enhancer == "No", hPGK == "No", neg_ctrls == "No", is.na(stimulation)) %>%
+  filter(sample_id != "pDNA_r1_gcf7027") %>%
+  dplyr::select(barcode_number, rpm, sample_id, reporter_id, neg_ctrls, library) %>%
+  mutate(activity = log2(rpm)) %>%
+  dplyr::select(-rpm) %>%
   spread(barcode_number, activity)
 names(bc_df_rep) <- gsub("([1-9]{1})", "Barcode \\1", names(bc_df_rep))
 
@@ -457,21 +429,20 @@ Conclusion: The five barcodes correlate very highly - we can just take the mean.
 
 ```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
 ## Calculate mean per condition and library
-bc_df_cDNA_filt <- bc_df_cDNA %>%
-  filter((pDNA == "BC5" & in_bc5) | (pDNA == "BC1" & in_bc1) | pDNA == "pMT02")
+bc_df_cDNA_filt <- bc_df_cDNA
 
 # Normalize by negative controls
 bc_df_cDNA_neg <- bc_df_cDNA_filt %>%
   filter(tf %in% c("RANDOM1", "RANDOM2", "RANDOM3")) %>%
-  distinct(reporter_id, sample_id, pDNA, activity, promoter) %>%
-  mutate(background_activity = ave(activity, sample_id, pDNA, promoter, FUN = function(x) mean(x, na.rm = T))) %>%
-  distinct(background_activity, sample_id, pDNA, promoter)
+  distinct(reporter_id, sample_id, activity, promoter) %>%
+  mutate(background_activity = ave(activity, sample_id, promoter, FUN = function(x) mean(x, na.rm = T))) %>%
+  distinct(background_activity, sample_id, promoter)
 
 bc_df_cDNA_filt <- bc_df_cDNA_filt %>%
   left_join(bc_df_cDNA_neg) %>%
   mutate(activity_minP = activity / background_activity) %>%
-  mutate(activity_minP_mean = ave(activity_minP, sample_id, pDNA, reporter_id, FUN = function (x) mean(x, na.rm = T))) %>%
-  mutate(reporter_activity_minP = ave(activity_minP, condition, pDNA, format, reporter_id, FUN = function (x) mean(x, na.rm = T)))
+  mutate(activity_minP_mean = ave(activity_minP, sample_id, reporter_id, FUN = function (x) mean(x, na.rm = T))) %>%
+  mutate(reporter_activity_minP = ave(activity_minP, condition, format, reporter_id, FUN = function (x) mean(x, na.rm = T)))
 ```
 
 ---
@@ -479,7 +450,7 @@ bc_df_cDNA_filt <- bc_df_cDNA_filt %>%
 ## Correlate biological replicates
 ```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
 bc_df_cDNA_filt_cor <- bc_df_cDNA_filt %>%
-  distinct(reporter_id, activity_minP_mean, replicate, condition, pDNA, format) %>%
+  distinct(reporter_id, activity_minP_mean, replicate, condition, format) %>%
   mutate(activity_minP_mean = log2(activity_minP_mean)) %>%
   spread(replicate, activity_minP_mean)
 
@@ -487,101 +458,12 @@ ggplot(bc_df_cDNA_filt_cor %>%
          drop_na(format),
        aes(x = `r1`, y = `r2`)) +
   geom_point() +
+  facet_wrap(~condition) +
   theme_pubr() +
-  facet_grid(format~pDNA) +
   ylab("Activity (log2) rep 2") +
   xlab("Activity (log2) rep 1")
 ```
 Conclusion: The biological replicates correlate very highly - we can just take the mean.
-
-## Plot correlation between activities of the two different libraries and the three tested formats
-
-Aim: Is the TF reporter libray with 1 barcode as good as the one with 5 barcodes? And how does the size of the wells impact the activities?
-```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
-tf_activites_format <- bc_df_cDNA_filt %>%
-  distinct(reporter_activity_minP, reporter_id, condition, pDNA, format) %>%
-  filter(!is.na(condition))
-
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", pDNA == "BC5") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, format) %>%
-         spread(format, reporter_activity_minP),
-       aes(x = `12W`, y = `96W`)) +
-  geom_point() +
-  ylab("Activity (log2) 96W") +
-  xlab("Activity (log2) 12W") +
-  theme_pubr() +
-  geom_abline() +
-  ggtitle("5-Barcode library")
-
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", pDNA == "BC5") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, format) %>%
-         spread(format, reporter_activity_minP),
-       aes(x = `12W`, y = `384W`)) +
-  geom_point() +
-  ylab("Activity (log2) 384W") +
-  xlab("Activity (log2) 12W") +
-  theme_pubr() +
-  geom_abline() +
-  ggtitle("5-Barcode library")
-
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", pDNA == "pMT02") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, format) %>%
-         spread(format, reporter_activity_minP),
-       aes(x = `12W`, y = `96W`)) +
-  geom_point() +
-  ylab("Activity (log2) 96W") +
-  xlab("Activity (log2) 12W") +
-  theme_pubr() +
-  geom_abline() +
-  ggtitle("pMT02")
-
-
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", format == "12W") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, pDNA) %>%
-         spread(pDNA, reporter_activity_minP),
-       aes(x = `BC1`, y = `BC5`)) +
-  geom_point() +
-  ylab("Activity (log2) BC5") +
-  xlab("Activity (log2) BC1") +
-  theme_pubr() +
-  geom_abline() +
-  ggtitle("12W")
-
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", format == "96W") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, pDNA) %>%
-         spread(pDNA, reporter_activity_minP),
-       aes(x = `BC1`, y = `BC5`)) +
-  geom_point() +
-  ylab("Activity (log2) BC5") +
-  xlab("Activity (log2) BC1") +
-  theme_pubr() +
-  geom_abline() +
-  ggtitle("96W")
-
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", format == "384W") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, pDNA) %>%
-         spread(pDNA, reporter_activity_minP),
-       aes(x = `BC1`, y = `BC5`)) +
-  geom_point() +
-  ylab("Activity (log2) BC5") +
-  xlab("Activity (log2) BC1") +
-  theme_pubr() +
-  geom_abline() +
-  ggtitle("384W")
-```
-Conclusion: The two libraries give almost exactly the same activities -> we can even use the library with one barcode. The 384W format seems to be a bit worse than the 96W and 12W. But: good news - we can use the 96W format as it gives exactly the same data as when using 12W.
 
 ---
 
@@ -589,50 +471,32 @@ Conclusion: The two libraries give almost exactly the same activities -> we can 
 Aim: Do we see VDR upregulation with all libraries?
 ```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
 ggplot(bc_df_cDNA_filt %>%
-         filter(reporter_id == "VDR::RXRA_10bp_21bp_mCMV_2", !is.na(condition), condition != "pDNA") %>%
+         filter(neg_ctrls == "No", native_enhancer == "No", commercial_reporter == "No", condition != "pDNA") %>%
+         #filter(tf %in% c("ELK1")) %>%
          mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, pDNA, format, condition),
+         distinct(reporter_activity_minP, reporter_id, condition, tf),
+       aes(x = condition, y = reporter_activity_minP)) +
+  geom_quasirandom() +
+  ylab("Activity (log2)") +
+  theme_pubr(x.text.angle = 90) +
+  facet_wrap(~tf)
+
+bc5_lib <- read_csv("/DATA/usr/m.trauernicht/projects/prime_TF_reporters/library_design/prime_reporter_library.csv") %>%
+  mutate(downstream = gsub(".*CACGACGCTCTTCCGATCT", "", sequence)) %>%
+  mutate(bc = gsub("(.*)CATCGTCGCATCCAAGAG", "\\1", downstream))
+
+ggplot(bc_df_cDNA_filt %>%
+         mutate(tf = gsub("_.*", "", tf)) %>%
+         filter(neg_ctrls == "No", native_enhancer == "No", condition != "pDNA") %>%
+         filter(!tf %in% c("RANDOM1", "RANDOM2", "RANDOM3")) %>%
+         filter(barcode %in% bc5_lib$bc) %>%
+         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
+         distinct(reporter_activity_minP, reporter_id, condition, tf),
        aes(x = condition, y = reporter_activity_minP)) +
   geom_bar(stat = "identity") +
   ylab("Activity (log2)") +
   theme_pubr(x.text.angle = 90) +
-  facet_wrap(~pDNA)
+  facet_wrap(~tf)
 ```
 Conclusion: In all libraries there is a clear VDR upregulation (~16-fold, which is less than before). 
 
----
-
-## Compare activity from previously used library (pMT02) to new libraries
-Aim: Show that the libraries recapitulate the previously measured activities with pMT02/09 well.
-```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
-cDNA_df <- read.csv("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/gcf7124_stimulations/results/mt20240528_reporter_activity_filt_combined.csv", header = T) %>%
-  filter(condition %in% c("U2OS", "U2OS_Calcitriol")) %>%
-  mutate(condition = ifelse(condition == "U2OS", "U2OS_DMSO", "U2OS_Calcitriol")) %>%
-  distinct(reporter_id, condition, reporter_activity_minP) %>%
-  mutate(pDNA = "pMT02_prev", format = "12W")
-
-tf_activites_format_comb <- rbind(tf_activites_format, cDNA_df)
-
-ggplot(tf_activites_format_comb %>%
-         filter(condition == "U2OS_Calcitriol", format == "12W") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, pDNA) %>%
-         spread(pDNA, reporter_activity_minP),
-       aes(x = `BC5`, y = `pMT02_prev`)) +
-  geom_point() +
-  ylab("Activity (log2) previous pMT02/09 data") +
-  xlab("Activity (log2) BC5") +
-  theme_pubr() +
-  geom_abline()
-
-
-cor_tf_activities <- tf_activites_format_comb %>%
-  filter(condition == "U2OS_Calcitriol", format == "12W") %>%
-  mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-  distinct(reporter_activity_minP, reporter_id, pDNA) %>%
-  spread(pDNA, reporter_activity_minP) %>%
-  na.omit()
-
-cor(cor_tf_activities$BC5, cor_tf_activities$pMT02_prev)
-```
-Conclusion: Activities between new and old library seem to correlate very well (R ~ 0.9).
