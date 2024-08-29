@@ -1,0 +1,5 @@
+﻿path;file;gcf;replicate;cell;pDNA;condition;format;sample;sample_id;stimulation;reference_condition;transfection;labguru_experiment;target;effect_size;off_target
+/DATA/usr/d.goodall/Projects/TF-reporters/NSCLC/Scripts/dg20240807/cDNA_results/;7881_1_PC9_dmso_B1_CGTCTCATAT-AGCTACTATA_S1_barcode_counts.tsv;gcf7881;r1;PC9;pMT02;PC9_DMSO;12W;PC9_DMSO_r1;PC9_DMSO_r1_gcf7881;;;lipofection;E2660;;;
+/DATA/usr/d.goodall/Projects/TF-reporters/NSCLC/Scripts/dg20240807/cDNA_results/;7881_2_PC9_gefitinib_250nM_B1_ATTCCATAAG-CCACCAGGCA_S2_barcode_counts.tsv;gcf7881;r1;PC9;pMT02;PC9_Gef;12W;PC9_Gef_r1;PC9_Gef_r1_gcf7881;pathway;PC9_DMSO;lipofection;E2660;;;
+/DATA/usr/d.goodall/Projects/TF-reporters/NSCLC/Scripts/dg20240807/cDNA_results/;7881_3_PC9_dmso_B2_GACGAGATTA-AGGATAATGT_S3_barcode_counts.tsv;gcf7881;r2;PC9;pMT02;PC9_DMSO;12W;PC9_DMSO_r2;PC9_DMSO_r2_gcf7881;;;lipofection;E2660;;;
+/DATA/usr/d.goodall/Projects/TF-reporters/NSCLC/Scripts/dg20240807/cDNA_results/;7881_4_PC9_gefitinib_250nM_B2_AACATCGCGC-ACAAGTGGAC_S4_barcode_counts.tsv;gcf7881;r2;PC9;pMT02;PC9_Gef;12W;PC9_Gef_r2;PC9_Gef_r2_gcf7881;pathway;PC9_DMSO;lipofection;E2660;;;

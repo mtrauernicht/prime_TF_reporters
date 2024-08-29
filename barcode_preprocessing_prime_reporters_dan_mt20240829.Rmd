@@ -155,7 +155,7 @@ ggplot_custom <- function(...) ggplot2::ggplot(...) +
 
 ```{r data import, out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
 # Load metadata file that contains all required information about the sequenced samples
-metadata_df <- read_csv2("/DATA/usr/m.trauernicht/projects/prime_TF_reporters/data/mt20240826_metadata_all.csv")
+metadata_df <- read_csv2("/DATA/usr/m.trauernicht/projects/prime_TF_reporters/data/mt20240829_metadata_dan.csv")
 metadata_df_pDNA_old <- read_csv2("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/mt20240528_metadata_all.csv") %>%
   filter(file == "7027_73_pDNA_E2035_CCGCGGTT-TCTGTTGG_S73_barcode_counts.tsv") %>%
   mutate(pDNA = "pMT02")
@@ -166,24 +166,11 @@ metadata_df <- rbind.fill(metadata_df, metadata_df_pDNA_old) %>%
 bc_files <- paste(metadata_df$path, metadata_df$file, sep = "")
 bc_files <- lapply(bc_files, fread, header = FALSE)
 ## Name files by the combination of sample_id and pDNA
-names(bc_files) <- paste(metadata_df$sample_id, metadata_df$pDNA, sep = "_")
+names(bc_files) <- unique(metadata_df$sample_id)
 
 # Import barcode annotation of both libraries
 bc_annotation <- read_csv("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/library_design/bc_annotation_combined.csv") %>%
   filter(library == "1+2")
-
-# Import mini library barcodes
-bc1_lib <- read_csv("/DATA/usr/m.trauernicht/projects/prime_TF_reporters/library_design/prime_reporter_library_single.csv") %>%
-  mutate(downstream = gsub(".*CACGACGCTCTTCCGATCT", "", sequence)) %>%
-  mutate(bc = gsub("(.*)CATCGTCGCATCCAAGAG", "\\1", downstream))
-
-bc5_lib <- read_csv("/DATA/usr/m.trauernicht/projects/prime_TF_reporters/library_design/prime_reporter_library.csv") %>%
-  mutate(downstream = gsub(".*CACGACGCTCTTCCGATCT", "", sequence)) %>%
-  mutate(bc = gsub("(.*)CATCGTCGCATCCAAGAG", "\\1", downstream))
-
-bc_annotation <- bc_annotation %>%
-  mutate(in_bc1 = barcode %in% bc1_lib$bc,
-         in_bc5 = barcode %in% bc5_lib$bc)
 ```
 
 
@@ -191,11 +178,8 @@ bc_annotation <- bc_annotation %>%
 
 ```{r cluster_compare, out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
 # Generate one long data frame from the list of data frames
-bc_df <- bind_rows(bc_files, .id = "sample_id_pDNA") %>%
-  dplyr::select(sample_id_pDNA, "barcode" = V1, "starcode_counts" = V2) %>%
-  mutate(sample_id = gsub("(.*)_.*", "\\1", sample_id_pDNA),
-         pDNA = gsub(".*_(.*)", "\\1", sample_id_pDNA)) %>%
-  dplyr::select(-sample_id_pDNA)
+bc_df <- bind_rows(bc_files, .id = "sample_id") %>%
+  dplyr::select(sample_id, "barcode" = V1, "starcode_counts" = V2)
 
 # Library 1 has barcodes of length 12 while library 2 has barcodes of length 13
 # For sequencing samples that have library 1 and 2 mixed I extracted barcodes of length >=12
