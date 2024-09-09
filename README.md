@@ -7,3 +7,4 @@ We previously identified prime TF reporters for 60 TFs: https://www.biorxiv.org/
 - The ```barcode_preprocessing_prime_reporters.Rmd``` script contains the computation of the TF activities from the barcode counts and plotting of the TF activities. 
 - The ```data/``` folder contains the scripts used for the raw data analysis: in these scripts barcodes are extracted from the fastq sequencing files and printed into a single .tsv file per sample. Moreover, a metadata file can be found in this folder that is needed for the ```barcode_preprocessing_prime_reporters.Rmd``` script.
 - The ```library_design/``` folder contains the script used to generate the prime reporter sequences for the oligo library synthesis.
+- The ```analyses/``` folder contains any additional non-standard analyses.
