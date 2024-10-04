@@ -182,6 +182,9 @@ bc5_lib <- read_csv("/DATA/usr/m.trauernicht/projects/prime_TF_reporters/library
   mutate(bc = gsub("(.*)CATCGTCGCATCCAAGAG", "\\1", downstream))
 
 bc_annotation <- bc_annotation %>%
+  # first I need to shorten the STAT6 and NR1H2 barcodes because I trimmed those in the prime reporter library
+  mutate(barcode = ifelse(tf == "STAT6_TF-seq", gsub("^[A-Z]{4}", "", barcode), barcode)) %>%
+  mutate(barcode = ifelse(tf == "NR1H2", gsub(".*([A-Z]{12}$)", "\\1", barcode), barcode)) %>%
   mutate(in_bc1 = barcode %in% bc1_lib$bc,
          in_bc5 = barcode %in% bc5_lib$bc)
 ```
@@ -515,34 +518,37 @@ Conclusion: The biological replicates correlate very highly - we can just take t
 Aim: Is the TF reporter libray with 1 barcode as good as the one with 5 barcodes? And how does the size of the wells impact the activities?
 ```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
 tf_activites_format <- bc_df_cDNA_filt %>%
-  distinct(reporter_activity_minP, reporter_id, condition, pDNA, format) %>%
+  distinct(reporter_activity_minP, reporter_id, condition, pDNA, format, tf) %>%
   filter(!is.na(condition))
 
-ggplot(tf_activites_format %>%
+tf_activites_format2 <- tf_activites_format %>%
          filter(condition == "U2OS_DMSO", pDNA == "BC5") %>%
          mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, format) %>%
-         spread(format, reporter_activity_minP),
-       aes(x = `12W`, y = `96W`)) +
-  geom_point() +
+         distinct(reporter_activity_minP, reporter_id, format, tf) %>%
+         mutate(neg_ctrl = ifelse(tf %in% c("RANDOM1", "RANDOM2", "RANDOM3"), "neg_ctrl", "reporter")) %>%
+         spread(format, reporter_activity_minP)
+
+ggplot(,aes(x = `12W`, y = `96W`, color = neg_ctrl)) +
+  geom_abline(lty = 2) +
+  geom_point(data = tf_activites_format2 %>% filter(neg_ctrl == "reporter"), color = "#DD6C48") +
+  geom_point(data = tf_activites_format2 %>% filter(neg_ctrl == "neg_ctrl"), color = "grey80") +
   ylab("Activity (log2) 96W") +
   xlab("Activity (log2) 12W") +
   theme_pubr() +
-  geom_abline() +
-  ggtitle("5-Barcode library")
+  labs_pubr() +
+  ggtitle("12W vs 96W") +
+  theme(aspect.ratio = 1)
 
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", pDNA == "BC5") %>%
-         mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, format) %>%
-         spread(format, reporter_activity_minP),
-       aes(x = `12W`, y = `384W`)) +
-  geom_point() +
+ggplot(,aes(x = `12W`, y = `384W`, color = neg_ctrl)) +
+  geom_abline(lty = 2) +
+  geom_point(data = tf_activites_format2 %>% filter(neg_ctrl == "reporter"), color = "#DD6C48") +
+  geom_point(data = tf_activites_format2 %>% filter(neg_ctrl == "neg_ctrl"), color = "grey80") +
   ylab("Activity (log2) 384W") +
   xlab("Activity (log2) 12W") +
   theme_pubr() +
-  geom_abline() +
-  ggtitle("5-Barcode library")
+  labs_pubr() +
+  ggtitle("12W vs 384W") +
+  theme(aspect.ratio = 1)
 
 ggplot(tf_activites_format %>%
          filter(condition == "U2OS_DMSO", pDNA == "pMT02") %>%
@@ -571,18 +577,24 @@ ggplot(tf_activites_format %>%
   geom_abline() +
   ggtitle("12W")
 
-ggplot(tf_activites_format %>%
-         filter(condition == "U2OS_DMSO", format == "96W") %>%
+tf_activites_format2 <- tf_activites_format %>%
+         filter(condition == "U2OS_DMSO", format == "96W", pDNA != "pMT02") %>%
          mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
-         distinct(reporter_activity_minP, reporter_id, pDNA) %>%
-         spread(pDNA, reporter_activity_minP),
-       aes(x = `BC1`, y = `BC5`)) +
-  geom_point() +
+         distinct(reporter_activity_minP, reporter_id, pDNA, tf) %>%
+         mutate(neg_ctrl = ifelse(tf %in% c("RANDOM1", "RANDOM2", "RANDOM3"), "neg_ctrl", "reporter")) %>%
+         spread(pDNA, reporter_activity_minP)
+
+ggplot(,aes(x = `BC1`, y = `BC5`, color = neg_ctrl)) +
+  geom_abline(lty = 2) +
+  geom_point(data = tf_activites_format2 %>% filter(neg_ctrl == "reporter"), color = "#DD6C48") +
+  geom_point(data = tf_activites_format2 %>% filter(neg_ctrl == "neg_ctrl"), color = "grey80") +
   ylab("Activity (log2) BC5") +
   xlab("Activity (log2) BC1") +
   theme_pubr() +
-  geom_abline() +
-  ggtitle("96W")
+  labs_pubr() + 
+  ggtitle("96W") +
+  theme(aspect.ratio = 1)
+
 
 ggplot(tf_activites_format %>%
          filter(condition == "U2OS_DMSO", format == "384W") %>%
@@ -608,10 +620,12 @@ ggplot(bc_df_cDNA_filt %>%
          filter(reporter_id == "VDR::RXRA_10bp_21bp_mCMV_2", !is.na(condition), condition != "pDNA") %>%
          mutate(reporter_activity_minP = log2(reporter_activity_minP)) %>%
          distinct(reporter_activity_minP, reporter_id, pDNA, format, condition),
-       aes(x = condition, y = reporter_activity_minP)) +
+       aes(x = condition, y = reporter_activity_minP, fill = condition)) +
   geom_bar(stat = "identity") +
   ylab("Activity (log2)") +
   theme_pubr(x.text.angle = 90) +
+  scale_fill_manual(values = c("#DD6C48", "grey80")) +
+  labs_pubr() +
   facet_wrap(~pDNA)
 ```
 Conclusion: In all libraries there is a clear VDR upregulation (~16-fold, which is less than before). 
@@ -621,10 +635,10 @@ Conclusion: In all libraries there is a clear VDR upregulation (~16-fold, which 
 ## Compare activity from previously used library (pMT02) to new libraries
 Aim: Show that the libraries recapitulate the previously measured activities with pMT02/09 well.
 ```{r out.width= "80%", fig.align= "center",  warning= FALSE, message=FALSE}
-cDNA_df <- read.csv("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/gcf7124_stimulations/results/mt20240528_reporter_activity_filt_combined.csv", header = T) %>%
+cDNA_df <- read.csv("/DATA/usr/m.trauernicht/projects/SuRE-TF/data/gcf7124_stimulations/results/mt20241003_reporter_activity_filt_combined.csv", header = T) %>%
   filter(condition %in% c("U2OS", "U2OS_Calcitriol")) %>%
   mutate(condition = ifelse(condition == "U2OS", "U2OS_DMSO", "U2OS_Calcitriol")) %>%
-  distinct(reporter_id, condition, reporter_activity_minP) %>%
+  distinct(reporter_id, condition, reporter_activity_minP, tf) %>%
   mutate(pDNA = "pMT02_prev", format = "12W")
 
 tf_activites_format_comb <- rbind(tf_activites_format, cDNA_df)
