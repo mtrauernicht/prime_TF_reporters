@@ -1,0 +1,237 @@
+---
+title: "Detailed TF reporter activity analysis"
+author: 
+  - name: "Max Trauernicht"
+    email: "m.trauernicht@nki.nl"
+    affiliation: "Netherlands Cancer Institute - van Steensel lab"
+
+date: '`r format(Sys.time(), "%d/%m/%Y")`'
+output:
+  html_document:
+    theme: united
+    highlight: pygments
+    fig_caption: yes
+    code_folding: hide
+    df_print: kable
+    toc: true
+    toc_depth: 4
+    toc_float:
+      collapsed: false
+---
+
+---
+
+### Aim
+35,500 reporters for 86 TFs were transfected into 9 different cell types + tested across ~100 perturbation conditions. In this script I will analyze TF reporter activities in detail and review how individual reporters respond to TF perturbations.
+
+
+### Description of input data
+- commercial_reporter = positive control reporter sequence from commercial source
+- neg_ctrls = reporter with mutated TF binding sites?
+- hPGK = positive control, chunk from hPGK promoter (only in lib 1)
+- native_enhancer = genomic mES enhancer sequence chunks from Miguels libraries (only lib 1)
+- reporter_activity_minP = mean activity relative to median of negative control reporters (per core promoter)
+- reporter_activity_neg = mean activity relative to its paired negative control (identical reporter with mutated binding sites)
+
+---
+
+## Setup {.tabset}
+
+<!-- little HTML script to do indentation of the table of contents -->
+<script>
+    $(document).ready(function() {
+      $items = $('div#TOC li');
+      $items.each(function(idx) {
+        num_ul = $(this).parentsUntil('#TOC').length;
+        $(this).css({'text-indent': num_ul * 10, 'padding-left': 0});
+      });
+
+    });
+</script>
+
+```{css, echo = FALSE}
+div.sourceCode {
+  overflow-x: hidden;
+}
+```
+
+### Libraries 
+
+```{r setup, out.width= "80%", fig.align= "center", warning = FALSE, message= FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+StartTime <-Sys.time()
+
+# 8-digit Date tag:
+Date <- substr(gsub("-","",Sys.time()),1,8) 
+# libraries:
+library(RColorBrewer)
+library(ggplot2)
+library(dplyr)
+library(maditr)
+library(tibble)
+library(pheatmap)
+library(ggpubr)
+library(visNetwork)
+library(ggbeeswarm)
+library(ggforce)
+library(viridis)
+library(plyr)
+library(igraph)
+library(ggraph)
+library(cowplot)
+library(gridExtra)
+library(pROC)
+library(tidyr)
+library(stringr)
+library(randomForest)
+library(ggrastr)
+library(readr)
+library(ggbiplot)
+library(IHW)
+library(biomaRt)
+library(ggh4x)
+library(ggiraph)
+library(plotly)
+library(AMR)
+library(umap)
+library(ggrepel)
+```
+
+### Functions
+
+```{r out.width= "80%", fig.align= "center"}
+### Custom functions
+SetFileName <- function(filename, initials) {
+  # Set filename with extension and initials to make filename with date integrated.
+  filename <- substitute(filename)
+  initials <- substitute(initials)
+  filename <- paste0(initials, Date, filename)
+  filename
+}
+
+
+# Extract p-value from linear model
+lmp <- function (modelobject) {
+    if (class(modelobject) != "lm") stop("Not an object of class 'lm' ")
+    f <- summary(modelobject)$fstatistic
+    p <- pf(f[1],f[2],f[3],lower.tail=F)
+    attributes(p) <- NULL
+    return(p)
+}
+
+# Set custom ggplot2 theme and custom colors
+theme_classic_lines <- function() {
+  theme_pubr(border = F, legend = "top") +
+            theme(panel.grid.major = element_line(colour = "#adb5bd", linewidth = 0.25),
+                  strip.background = element_rect(fill = "#ced4da")
+            )
+}
+
+theme_classic_lines_45 <- function() {
+  theme_pubr(border = T, legend = "top", x.text.angle = 45) +
+            theme(panel.grid.major = element_line(colour = "#adb5bd", linewidth = 0.25),
+                  strip.background = element_rect(fill = "#ced4da")
+            )
+}
+
+theme_classic_lines_90 <- function() {
+  theme_pubr(border = T, legend = "top", x.text.angle = 90) +
+            theme(panel.grid.major = element_line(colour = "#adb5bd", linewidth = 0.25),
+                  strip.background = element_rect(fill = "#ced4da")
+            )
+}
+
+theme_barplot <- function() {
+  theme_pubr(border = T, legend = "none") +
+            theme(panel.grid.major.x = element_line(colour = "black", linewidth = 0.25),
+                  strip.background = element_blank(),
+                  strip.text = element_text(face="bold", hjust=0)
+            )
+}
+
+theme_set(theme_classic_lines())
+
+colors_diverse <- c("#264653", "#9AC1AE", "#5D987B", "#f2cc8f", "#e76f51")
+
+cell_colors <- c("A549" = "#f2cc8f", "HCT116" = "#ED1C24", "HEK293" = "#00B4D8", 
+                               "HepG2" = "#B3B3B3", "K562" = "#A67C52", "MCF7" = "#81B29A", 
+                               "U2OS" = "#3D405B", "mES" = "#EAB69F", "NPC" = "#E07A5F")
+
+ggplot_custom <- function(...) ggplot2::ggplot(...) + 
+  scale_color_manual(values = colors_diverse) + 
+  scale_fill_manual(values = colors_diverse)
+```
+
+### Loading data
+
+```{r out.width= "80%", fig.align= "center"}
+# Import processed bc counts from the preprocessing step
+cDNA_df <- read.csv("/DATA/usr/m.trauernicht/projects/prime_TF_reporters/data/dan_20241003/mt20241004_reporter_activities.csv", header = T)
+
+# Compute perturbation-induced fold-change
+ref_activities <- cDNA_df %>%
+  filter(condition == "PC9_DMSO") %>%
+  dplyr::select("ref_activity" = mean_activity_sample_minP, replicate, reporter_id) %>%
+  distinct()
+  
+cDNA_df <- cDNA_df %>%
+  left_join(ref_activities, by = c("replicate", "reporter_id")) %>%
+  mutate(mean_activity_dif = mean_activity_sample_minP / ref_activity) %>%
+  mutate(reporter_activity_dif = ave(mean_activity_dif, condition, reporter_id, FUN = function(x) mean(x, na.rm = T))) %>%
+  mutate(tf_activity_dif = ave(mean_activity_dif, condition, tf, FUN = function(x) mean(x, na.rm = T))) %>%
+  mutate(tf = gsub("_.*", "", tf))
+
+```
+
+---
+
+```{r out.width= "80%", fig.align= "center"}
+## Plot the reporter activities of one TF of interest (replicates as individual dots)
+ggplot(cDNA_df %>%
+         filter(neg_ctrls == "No", native_enhancer == "No") %>%
+         filter(tf %in% c("ELK1")) %>%
+         mutate(mean_activity_sample_minP = log2(mean_activity_sample_minP)) %>%
+         distinct(mean_activity_sample_minP, reporter_id, condition, tf, replicate, prime),
+       aes(x = condition, y = mean_activity_sample_minP, color = prime)) +
+  geom_quasirandom() +
+  scale_color_manual(values = c("yes" = "red", "no" = "black")) +
+  ylab("Activity (log2)") +
+  theme_pubr(x.text.angle = 90)
+
+## Plot the perturbation-induced fold-change of one TF of interest (replicates separately)
+ggplot(cDNA_df %>%
+         filter(neg_ctrls == "No", native_enhancer == "No", !is.na(stimulation)) %>%
+         filter(tf %in% c("ELK1")) %>%
+         distinct(mean_activity_dif, reporter_id, condition, tf, replicate, prime),
+       aes(x = replicate, y = mean_activity_dif, color = prime)) +
+  geom_hline(yintercept = 1, lty = 2) +
+  geom_quasirandom() +
+  scale_color_manual(values = c("yes" = "red", "no" = "black")) +
+  ylab("Activity (log2)") +
+  theme_pubr(x.text.angle = 90)
+
+## Plot the perturbation-induced fold-change of all TFs (with a fold-change > 1.5)
+tfs_changed <- cDNA_df %>%
+  filter(tf_activity_dif > 1.5 | tf_activity_dif < 1/1.5)
+
+ggplot(cDNA_df %>%
+         filter(tf %in% tfs_changed$tf, !is.na(stimulation)) %>%
+         filter(neg_ctrls == "No", native_enhancer == "No") %>%
+         distinct(mean_activity_dif, reporter_id, tf, prime, replicate, commercial_reporter),
+       aes(x = replicate, y = mean_activity_dif, color = prime, shape = commercial_reporter)) +
+  geom_hline(yintercept = 1, lty = 2) +
+  geom_quasirandom() +
+  scale_color_manual(values = c("yes" = "red", "no" = "black")) +
+  ylab("Activity (log2)") +
+  theme_pubr(x.text.angle = 90, border = T) +
+  facet_wrap(~tf, scales = "free_y")
+```
+
+# Session Info
+```{r}
+paste("Run time: ",format(Sys.time()-StartTime))
+getwd()
+date()
+sessionInfo()
+```
+
